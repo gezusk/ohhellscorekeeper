@@ -1,0 +1,596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"/>
+  <meta name="apple-mobile-web-app-capable" content="yes"/>
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+  <meta name="theme-color" content="#1a1a2e"/>
+  <meta name="description" content="Oh Hell card game score keeper"/>
+  <title>Oh Hell Score Keeper</title>
+  <link rel="manifest" href="manifest.json"/>
+  <link rel="apple-touch-icon" href="icon-192.png"/>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.9/babel.min.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+    html, body, #root { height:100%; width:100%; overflow:hidden; background:#1a1a2e; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+    input[type=range] { accent-color: #DD4B39; }
+    ::-webkit-scrollbar { width: 4px; }
+    ::-webkit-scrollbar-thumb { background: #334; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel">
+    const { useState, useEffect, useCallback, useRef } = React;
+
+    // ── Constants ──
+    const RED = "#DD4B39", GREEN = "#2E7D32", DARK = "#1a1a2e", CARD_BG = "#16213e", SURFACE = "#0f3460";
+
+    const SCORING = {
+      STANDARD: { id: "STANDARD", name: "Standard (10 + Bid)" },
+      SIMPLE: { id: "SIMPLE", name: "Simple (10 or 0)" },
+      HIGH_STAKES: { id: "HIGH_STAKES", name: "High Stakes (-Diff)" },
+      HYBRID: { id: "HYBRID", name: "Hybrid (10+T or -D)" },
+    };
+
+    const MODES = {
+      MAX_DOWN_UP: { id: "MAX_DOWN_UP", name: "Max → 1 → 1 → Max" },
+      ONE_UP_DOWN: { id: "ONE_UP_DOWN", name: "1 → Max → 1" },
+      ONE_UP: { id: "ONE_UP", name: "1 → Max" },
+      MAX_DOWN: { id: "MAX_DOWN", name: "Max → 1" },
+      ONE_UP_MAX_DOWN: { id: "ONE_UP_MAX_DOWN", name: "1 → Max → Max → 1" },
+    };
+
+    // ── Game Logic ──
+    function calcScore(bid, tricks, style) {
+      const diff = Math.abs(bid - tricks), hit = diff === 0;
+      switch (style) {
+        case "STANDARD": return hit ? 10 + bid : tricks;
+        case "SIMPLE": return hit ? 10 : 0;
+        case "HIGH_STAKES": return hit ? 10 + tricks : -diff;
+        case "HYBRID": return hit ? 10 + tricks : tricks - diff;
+        default: return 0;
+      }
+    }
+
+    function genRounds(max, mode) {
+      const up = Array.from({ length: max }, (_, i) => i + 1);
+      const down = Array.from({ length: max - 1 }, (_, i) => max - 1 - i);
+      switch (mode) {
+        case "MAX_DOWN_UP": return [...up].reverse().concat([1], up.slice(1));
+        case "ONE_UP_DOWN": return [...up, ...down];
+        case "ONE_UP": return up;
+        case "MAX_DOWN": return [...up].reverse();
+        case "ONE_UP_MAX_DOWN": return [...up, max, ...down];
+        default: return up;
+      }
+    }
+
+    let _uid = 0;
+    const uid = () => `p${++_uid}_${Date.now()}`;
+
+    // ── Storage helpers (localStorage for standalone PWA) ──
+    function loadSaved() {
+      try { return JSON.parse(localStorage.getItem("oh_hell_players") || "[]"); }
+      catch { return []; }
+    }
+    function savePlayers(names) {
+      try { localStorage.setItem("oh_hell_players", JSON.stringify(names)); } catch {}
+    }
+
+    // ── Small Components ──
+    function Stepper({ value, max, onChange }) {
+      return (
+        <div className="flex items-center gap-1">
+          <button onClick={() => value > 0 && onChange(value - 1)}
+            className="w-10 h-10 rounded-full text-white font-bold text-xl flex items-center justify-center"
+            style={{ background: RED }}>−</button>
+          <span className="w-10 text-center text-xl font-bold text-white">{value}</span>
+          <button onClick={() => value < max && onChange(value + 1)}
+            className="w-10 h-10 rounded-full text-white font-bold text-xl flex items-center justify-center"
+            style={{ background: RED }}>+</button>
+        </div>
+      );
+    }
+
+    function DropdownSelect({ label, options, selected, onSelect, keyFn, labelFn }) {
+      const [open, setOpen] = useState(false);
+      const ref = useRef(null);
+
+      useEffect(() => {
+        if (!open) return;
+        const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+        document.addEventListener("pointerdown", handler);
+        return () => document.removeEventListener("pointerdown", handler);
+      }, [open]);
+
+      return (
+        <div className="flex-1 relative" ref={ref}>
+          <button onClick={() => setOpen(!open)}
+            className="w-full px-3 py-2.5 rounded-xl text-sm font-medium text-white text-center truncate border transition-colors"
+            style={{ background: SURFACE, borderColor: open ? RED : "#334" }}>
+            {label} <span className="ml-1 text-xs">{open ? "▲" : "▼"}</span>
+          </button>
+          {open && (
+            <div className="absolute bottom-full left-0 right-0 mb-1 rounded-xl overflow-hidden shadow-xl z-50 border"
+              style={{ background: CARD_BG, borderColor: "#334" }}>
+              {options.map(o => (
+                <button key={keyFn(o)} onClick={() => { onSelect(keyFn(o)); setOpen(false); }}
+                  className="w-full px-4 py-3 text-left text-sm font-medium transition-colors"
+                  style={{ color: "white", background: keyFn(o) === selected ? RED : "transparent" }}>
+                  {labelFn(o)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Logo SVG Component ──
+    function Logo({ size = 260, opacity = 0.12 }) {
+      return (
+        <svg width={size} height={size} viewBox="0 0 108 108" style={{ opacity }}>
+          <g transform="translate(54,54) scale(1.65) translate(-54,-54)">
+            <g transform="translate(0,7)">
+              <g transform="rotate(10,60,60)">
+                <rect x="43" y="30" width="34" height="44" rx="2" fill="#F5F5F5" stroke="#000" strokeWidth="1"/>
+                <path d="M60,68 C60,68 45,55 45,48 C45,42 50,38 55,38 C58,38 59.5,40 60,42 C60.5,40 62,38 65,38 C70,38 75,42 75,48 C75,55 60,68 60,68 Z" fill="#DD4B39"/>
+              </g>
+              <g transform="rotate(-10,48,60)">
+                <rect x="31" y="30" width="34" height="44" rx="2" fill="#F5F5F5" stroke="#000" strokeWidth="1"/>
+                <path d="M48,38 C40,48 33,52 33,58 C33,62 36,65 41,65 C45,65 48,62 48,62 C48,62 48,68 44,70 L52,70 C48,68 48,62 48,62 C48,62 51,65 55,65 C60,65 63,62 63,58 C63,52 56,48 48,38 Z" fill="#000"/>
+              </g>
+              <g>
+                <path d="M 43,36 Q 38,22 40,18 Q 48,28 54,33 Q 60,28 68,18 Q 70,22 65,36 A 13,13 0 1,1 43,36 Z" fill="#DD4B39" stroke="#000" strokeWidth="1.5" strokeLinejoin="round"/>
+                <path d="M47,38 L51,40 L47,42 Z" fill="#FFEB3B"/>
+                <path d="M61,38 L57,40 L61,42 Z" fill="#FFEB3B"/>
+                <path d="M48,46 Q54,51 60,46" fill="none" stroke="#000" strokeWidth="1.5" strokeLinecap="round"/>
+                <path d="M54,53 L52,56 L56,56 Z" fill="#000"/>
+              </g>
+            </g>
+          </g>
+        </svg>
+      );
+    }
+
+    // ── Setup Screen ──
+    function SetupScreen({ onStart }) {
+      const [players, setPlayers] = useState([]);
+      const [saved, setSaved] = useState(() => loadSaved());
+      const [showAdd, setShowAdd] = useState(false);
+      const [name, setName] = useState("");
+      const [mode, setMode] = useState("MAX_DOWN_UP");
+      const [scoring, setScoring] = useState("STANDARD");
+      const [maxCards, setMaxCards] = useState(10);
+      const inputRef = useRef(null);
+
+      const absMax = players.length > 0 ? Math.max(1, Math.floor(52 / players.length)) : 52;
+      useEffect(() => { if (maxCards > absMax) setMaxCards(absMax); }, [players.length, absMax]);
+
+      const addPlayer = (n) => {
+        const trimmed = n.trim();
+        if (!trimmed || players.some(p => p.name.toLowerCase() === trimmed.toLowerCase())) return;
+        setPlayers(prev => [...prev, { id: uid(), name: trimmed }]);
+        const newSaved = [...new Set([...saved, trimmed])].sort();
+        setSaved(newSaved);
+        savePlayers(newSaved);
+        setName("");
+      };
+
+      const removePlayer = (id) => setPlayers(prev => prev.filter(p => p.id !== id));
+
+      const movePlayer = (from, to) => {
+        if (to < 0 || to >= players.length) return;
+        setPlayers(prev => {
+          const arr = [...prev];
+          const [item] = arr.splice(from, 1);
+          arr.splice(to, 0, item);
+          return arr;
+        });
+      };
+
+      const available = saved.filter(s => !players.some(p => p.name === s));
+
+      return (
+        <div className="flex flex-col h-full" style={{ background: DARK }}>
+          <div className="flex gap-3 p-4">
+            <button onClick={() => { setShowAdd(true); setTimeout(() => inputRef.current?.focus(), 100); }}
+              className="flex-1 py-3 rounded-xl text-white font-bold" style={{ background: RED }}>
+              Add Player
+            </button>
+            <button onClick={() => players.length >= 2 && onStart(players, mode, scoring, maxCards)}
+              disabled={players.length < 2}
+              className="flex-1 py-3 rounded-xl text-white font-bold disabled:opacity-40 transition-opacity"
+              style={{ background: GREEN }}>
+              Start Game
+            </button>
+          </div>
+
+          <div className="flex-1 overflow-y-auto px-4 relative">
+            <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+              <Logo />
+            </div>
+            {players.length === 0 ? (
+              <div className="flex items-center justify-center h-full text-lg font-bold" style={{ color: RED }}>Add players to begin</div>
+            ) : (
+              players.map((p, i) => (
+                <div key={p.id} className="rounded-xl mb-2 px-4 py-3 flex items-center gap-3 relative z-10" style={{ background: CARD_BG }}>
+                  <div className="flex flex-col gap-1">
+                    <button onClick={() => movePlayer(i, i - 1)} className="text-gray-400 text-xs leading-none" disabled={i === 0}>▲</button>
+                    <button onClick={() => movePlayer(i, i + 1)} className="text-gray-400 text-xs leading-none" disabled={i === players.length - 1}>▼</button>
+                  </div>
+                  <span className="flex-1 text-white font-semibold text-lg">{p.name}</span>
+                  <button onClick={() => removePlayer(p.id)} className="text-gray-400 text-xl px-2">✕</button>
+                </div>
+              ))
+            )}
+          </div>
+
+          <div className="rounded-t-2xl p-4 space-y-3" style={{ background: CARD_BG, boxShadow: "0 -4px 20px rgba(0,0,0,.5)" }}>
+            <div className="flex items-center gap-4">
+              <span className="text-white font-bold whitespace-nowrap">Cards: {maxCards}</span>
+              <input type="range" min={1} max={absMax} value={maxCards}
+                onChange={e => setMaxCards(+e.target.value)} className="flex-1" />
+            </div>
+            <div className="flex gap-3">
+              <DropdownSelect label={MODES[mode].name} options={Object.values(MODES)} selected={mode}
+                onSelect={setMode} keyFn={o => o.id} labelFn={o => o.name} />
+              <DropdownSelect label={SCORING[scoring].name} options={Object.values(SCORING)} selected={scoring}
+                onSelect={setScoring} keyFn={o => o.id} labelFn={o => o.name} />
+            </div>
+          </div>
+
+          {showAdd && (
+            <div className="fixed inset-0 bg-black bg-opacity-70 flex items-end sm:items-center justify-center z-50"
+              onClick={e => { if (e.target === e.currentTarget) setShowAdd(false); }}>
+              <div className="w-full max-w-md rounded-t-2xl sm:rounded-2xl p-5 max-h-[80vh] flex flex-col" style={{ background: CARD_BG }}>
+                <h2 className="text-white text-xl font-bold mb-3">Add Player</h2>
+                <div className="flex gap-2 mb-3">
+                  <input ref={inputRef} value={name} onChange={e => setName(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && addPlayer(name)}
+                    placeholder="Player name" className="flex-1 rounded-lg px-3 py-2 bg-gray-800 text-white border border-gray-600 outline-none focus:border-red-400" />
+                  <button onClick={() => addPlayer(name)} disabled={!name.trim()}
+                    className="px-5 py-2 rounded-lg text-white font-bold disabled:opacity-40" style={{ background: RED }}>Add</button>
+                </div>
+                <div className="border-t border-gray-700 my-2" />
+                <div className="flex-1 overflow-y-auto">
+                  {available.length === 0 ? (
+                    <div className="text-gray-500 text-center py-4">No saved players</div>
+                  ) : available.map(n => (
+                    <button key={n} onClick={() => { addPlayer(n); }}
+                      className="w-full text-left px-3 py-3 text-white text-lg font-semibold hover:bg-gray-700 rounded-lg transition-colors">{n}</button>
+                  ))}
+                </div>
+                <button onClick={() => setShowAdd(false)} className="mt-3 text-gray-400 text-center py-2">Close</button>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Bidding Screen ──
+    function BiddingScreen({ round, cards, players, dealer, bids, setBids, onSubmit, onBack, onHistory, onScores }) {
+      const total = bids.reduce((a, b) => a + b, 0);
+      const hooked = total === cards;
+      const otherBids = total - (bids[dealer] || 0);
+      const forbidden = cards - otherBids;
+      const order = buildOrder(dealer, players);
+
+      return (
+        <div className="flex flex-col h-full p-4" style={{ background: DARK }}>
+          <div className="flex justify-between items-start mb-3">
+            <div>
+              <h1 className="text-2xl font-bold" style={{ color: RED }}>Round {round}</h1>
+              <p className="text-gray-300">Deal: {cards} card{cards !== 1 ? "s" : ""}</p>
+            </div>
+            <div className="flex gap-2">
+              <SmBtn onClick={onScores}>Scores</SmBtn>
+              <SmBtn onClick={onHistory}>History</SmBtn>
+              <SmBtn onClick={onBack}>Back</SmBtn>
+            </div>
+          </div>
+          <div className="rounded-xl p-3 mb-3 text-center text-white font-bold"
+            style={{ background: hooked ? RED : "#222" }}>
+            {forbidden < 0 ? "Dealer can bid anything" : `Dealer can't bid: ${forbidden}`}
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-1">
+            {order.map(([idx, p]) => (
+              <div key={p.id} className="rounded-xl px-4 py-3" style={{ background: CARD_BG }}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-white font-bold text-lg">{p.name}</span>
+                    {idx === dealer && <span className="ml-2 text-xs font-bold px-2 py-0.5 rounded" style={{ background: RED, color: "white" }}>DEALER</span>}
+                  </div>
+                  <Stepper value={bids[idx]} max={cards} onChange={v => { const b = [...bids]; b[idx] = v; setBids(b); }} />
+                </div>
+              </div>
+            ))}
+          </div>
+          <button onClick={onSubmit} disabled={hooked}
+            className="w-full py-4 rounded-xl text-white font-bold text-lg mt-3 disabled:opacity-40 transition-opacity"
+            style={{ background: hooked ? "#666" : GREEN }}>
+            {hooked ? "Fix Bids (Hook Rule)" : "Play Round"}
+          </button>
+        </div>
+      );
+    }
+
+    // ── Scoring Screen ──
+    function ScoringScreen({ round, cards, players, dealer, bids, tricks, setTricks, scoring, onFinish, onBack, onScores }) {
+      const total = tricks.reduce((a, b) => a + b, 0);
+      const valid = total === cards;
+      const order = buildOrder(dealer, players);
+
+      return (
+        <div className="flex flex-col h-full p-4" style={{ background: DARK }}>
+          <div className="flex justify-between items-center mb-3">
+            <h1 className="text-2xl font-bold" style={{ color: RED }}>Round {round} Results</h1>
+            <div className="flex gap-2">
+              <SmBtn onClick={onScores}>Scores</SmBtn>
+              <SmBtn onClick={onBack}>Back</SmBtn>
+            </div>
+          </div>
+          <div className="rounded-xl p-3 mb-3 text-center text-white font-bold"
+            style={{ background: valid ? GREEN : RED }}>
+            Tricks: {total} / {cards}
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-1">
+            {order.map(([idx, p]) => {
+              const pts = calcScore(bids[idx], tricks[idx], scoring);
+              return (
+                <div key={p.id} className="rounded-xl px-4 py-3" style={{ background: CARD_BG }}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-white font-bold text-lg">{p.name}</span>
+                    <span className="text-gray-300 font-bold">Bid: {bids[idx]}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className={`font-semibold ${pts > 0 ? "text-green-400" : pts < 0 ? "text-red-400" : "text-gray-400"}`}>
+                      Points: {pts >= 0 ? "+" : ""}{pts}
+                    </span>
+                    <Stepper value={tricks[idx]} max={cards} onChange={v => { const t = [...tricks]; t[idx] = v; setTricks(t); }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <button onClick={onFinish} disabled={!valid}
+            className="w-full py-4 rounded-xl text-white font-bold text-lg mt-3 disabled:opacity-40 transition-opacity"
+            style={{ background: valid ? GREEN : "#666" }}>
+            Finish Round
+          </button>
+        </div>
+      );
+    }
+
+    // ── Leaderboard Screen ──
+    function LeaderboardScreen({ players, onBack }) {
+      const sorted = [...players].sort((a, b) => b.totalScore - a.totalScore);
+      const medals = ["🥇", "🥈", "🥉"];
+      return (
+        <div className="flex flex-col h-full p-4" style={{ background: DARK }}>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold" style={{ color: RED }}>Scores</h1>
+            <SmBtn onClick={onBack}>Close</SmBtn>
+          </div>
+          <div className="flex-1 overflow-y-auto space-y-2">
+            {sorted.map((p, i) => (
+              <div key={p.id} className="rounded-xl px-4 py-4 flex items-center" style={{ background: CARD_BG }}>
+                <span className="w-10 text-xl">{medals[i] || `#${i + 1}`}</span>
+                <span className="flex-1 text-white text-lg font-semibold">{p.name}</span>
+                <span className="text-white text-xl font-bold">{p.totalScore}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    // ── History Screen ──
+    function HistoryScreen({ history, onBack }) {
+      return (
+        <div className="flex flex-col h-full p-4" style={{ background: DARK }}>
+          <div className="flex justify-between items-center mb-4">
+            <h1 className="text-2xl font-bold" style={{ color: RED }}>History</h1>
+            <SmBtn onClick={onBack}>Close</SmBtn>
+          </div>
+          {history.length === 0 ? (
+            <div className="flex-1 flex items-center justify-center text-gray-500">No rounds completed yet</div>
+          ) : (
+            <div className="flex-1 overflow-y-auto space-y-3">
+              {[...history].reverse().map(r => (
+                <div key={r.roundNumber} className="rounded-xl p-4" style={{ background: CARD_BG }}>
+                  <div className="font-bold mb-2" style={{ color: RED }}>Round {r.roundNumber} ({r.cardCount} card{r.cardCount !== 1 ? "s" : ""})</div>
+                  {r.scores.map(s => (
+                    <div key={s.playerId} className="flex justify-between py-1 text-sm">
+                      <span className="text-white flex-1">{s.name}</span>
+                      <span className="text-gray-400 flex-1 text-center">Bid: {s.bid} | Got: {s.tricks}</span>
+                      <span className={`font-bold w-12 text-right ${s.pts > 0 ? "text-green-400" : s.pts < 0 ? "text-red-400" : "text-gray-400"}`}>
+                        {s.pts >= 0 ? "+" : ""}{s.pts}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // ── Game Over Screen ──
+    function GameOverScreen({ players, onRestart }) {
+      const sorted = [...players].sort((a, b) => b.totalScore - a.totalScore);
+      const medals = ["🥇", "🥈", "🥉"];
+      return (
+        <div className="flex flex-col h-full p-4 items-center" style={{ background: DARK }}>
+          <h1 className="text-4xl font-extrabold mt-6 mb-2" style={{ color: RED }}>GAME OVER</h1>
+          <p className="text-gray-400 mb-6">{sorted[0]?.name} wins!</p>
+          <div className="flex-1 w-full overflow-y-auto space-y-2">
+            {sorted.map((p, i) => (
+              <div key={p.id} className="rounded-xl px-4 py-4 flex items-center" style={{ background: CARD_BG }}>
+                <span className="w-12 text-2xl text-center">{medals[i] || `#${i + 1}`}</span>
+                <span className="flex-1 text-white text-xl font-semibold">{p.name}</span>
+                <span className="text-white text-2xl font-bold">{p.totalScore}</span>
+              </div>
+            ))}
+          </div>
+          <button onClick={onRestart}
+            className="w-full py-4 rounded-xl text-white font-bold text-lg mt-4"
+            style={{ background: RED }}>
+            New Game
+          </button>
+        </div>
+      );
+    }
+
+    // ── Helpers ──
+    function buildOrder(dealer, players) {
+      const n = players.length;
+      const start = (dealer + 1) % n;
+      return Array.from({ length: n }, (_, i) => {
+        const idx = (start + i) % n;
+        return [idx, players[idx]];
+      });
+    }
+
+    function SmBtn({ onClick, children }) {
+      return (
+        <button onClick={onClick} className="px-3 py-1.5 rounded-lg text-sm font-medium text-gray-300 transition-colors"
+          style={{ background: SURFACE }}>{children}</button>
+      );
+    }
+
+    // ── Main App ──
+    function App() {
+      const [screenStack, setScreenStack] = useState(["SETUP"]);
+      const screen = screenStack[screenStack.length - 1];
+
+      const [players, setPlayers] = useState([]);
+      const [scoring, setScoring] = useState("STANDARD");
+      const [rounds, setRounds] = useState([]);
+      const [roundIdx, setRoundIdx] = useState(0);
+      const [dealer, setDealer] = useState(0);
+      const [history, setHistory] = useState([]);
+      const [bids, setBids] = useState([]);
+      const [tricks, setTricks] = useState([]);
+
+      const push = (s) => setScreenStack(prev => [...prev, s]);
+      const pop = () => setScreenStack(prev => prev.length > 1 ? prev.slice(0, -1) : prev);
+
+      const roundNum = roundIdx + 1;
+      const cards = rounds.length > 0 ? rounds[roundIdx] : 1;
+
+      const handleBack = useCallback(() => {
+        if (screen === "SCORING") {
+          pop();
+        } else if (screen === "BIDDING" && roundIdx > 0 && history.length > 0) {
+          const prev = history[history.length - 1];
+          const newHist = history.slice(0, -1);
+          const newPlayers = players.map(p => {
+            const snap = prev.scores.find(s => s.playerId === p.id);
+            return snap ? { ...p, totalScore: p.totalScore - snap.pts } : p;
+          });
+          const prevBids = prev.scores.map(s => s.bid);
+          const prevTricks = prev.scores.map(s => s.tricks);
+          setPlayers(newPlayers);
+          setHistory(newHist);
+          setBids(prevBids);
+          setTricks(prevTricks);
+          setRoundIdx(roundIdx - 1);
+          setDealer(dealer === 0 ? players.length - 1 : dealer - 1);
+          setScreenStack(prev => [...prev.slice(0, -1), "SCORING"]);
+        } else {
+          pop();
+        }
+      }, [screen, roundIdx, history, players, dealer]);
+
+      const startGame = (p, mode, style, maxC) => {
+        const initialized = p.map(pl => ({ ...pl, totalScore: 0 }));
+        setPlayers(initialized);
+        setScoring(style);
+        const seq = genRounds(maxC, mode);
+        setRounds(seq);
+        setRoundIdx(0);
+        setDealer(0);
+        setHistory([]);
+        const zeros = new Array(p.length).fill(0);
+        setBids([...zeros]);
+        setTricks([...zeros]);
+        push("BIDDING");
+      };
+
+      const finishRound = () => {
+        const snapshots = players.map((p, i) => ({
+          name: p.name,
+          playerId: p.id,
+          bid: bids[i],
+          tricks: tricks[i],
+          pts: calcScore(bids[i], tricks[i], scoring),
+          total: p.totalScore + calcScore(bids[i], tricks[i], scoring),
+        }));
+        const updatedPlayers = players.map((p, i) => ({
+          ...p,
+          totalScore: p.totalScore + snapshots[i].pts,
+        }));
+        setPlayers(updatedPlayers);
+        setHistory(prev => [...prev, { roundNumber: roundNum, cardCount: cards, scores: snapshots }]);
+
+        if (roundIdx >= rounds.length - 1) {
+          push("GAME_OVER");
+        } else {
+          setRoundIdx(roundIdx + 1);
+          setDealer((dealer + 1) % players.length);
+          const zeros = new Array(players.length).fill(0);
+          setBids([...zeros]);
+          setTricks([...zeros]);
+          setScreenStack(prev => [...prev.slice(0, -1), "BIDDING"]);
+        }
+      };
+
+      return (
+        <div className="h-screen w-screen overflow-hidden flex flex-col" style={{ background: DARK }}>
+          <div className="w-full" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }} />
+          <div className="flex-1 overflow-hidden">
+            {screen === "SETUP" && <SetupScreen onStart={startGame} />}
+            {screen === "BIDDING" && (
+              <BiddingScreen round={roundNum} cards={cards} players={players} dealer={dealer}
+                bids={bids} setBids={setBids}
+                onSubmit={() => push("SCORING")} onBack={handleBack}
+                onHistory={() => push("HISTORY")} onScores={() => push("LEADERBOARD")} />
+            )}
+            {screen === "SCORING" && (
+              <ScoringScreen round={roundNum} cards={cards} players={players} dealer={dealer}
+                bids={bids} tricks={tricks} setTricks={setTricks} scoring={scoring}
+                onFinish={finishRound} onBack={handleBack} onScores={() => push("LEADERBOARD")} />
+            )}
+            {screen === "HISTORY" && <HistoryScreen history={history} onBack={pop} />}
+            {screen === "LEADERBOARD" && <LeaderboardScreen players={players} onBack={pop} />}
+            {screen === "GAME_OVER" && (
+              <GameOverScreen players={players}
+                onRestart={() => { setScreenStack(["SETUP"]); }} />
+            )}
+          </div>
+          <div className="w-full" style={{ paddingBottom: "env(safe-area-inset-bottom, 0px)" }} />
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+  <script>
+    // Register service worker for offline PWA support
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("sw.js").catch(() => {});
+      });
+    }
+  </script>
+</body>
+</html>
