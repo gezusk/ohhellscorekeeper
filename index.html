@@ -16,7 +16,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
-    html, body, #root { height:100%; width:100%; overflow:hidden; background:#1a1a2e; }
+    html, body, #root { height:100dvh; width:100%; overflow:hidden; background:#1a1a2e; }
     body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
     input[type=range] { accent-color: #DD4B39; }
     ::-webkit-scrollbar { width: 4px; }
@@ -240,7 +240,7 @@
             )}
           </div>
 
-          <div className="rounded-t-2xl p-4 space-y-3" style={{ background: CARD_BG, boxShadow: "0 -4px 20px rgba(0,0,0,.5)" }}>
+          <div className="rounded-t-2xl p-4 space-y-3" style={{ background: CARD_BG, boxShadow: "0 -4px 20px rgba(0,0,0,.5)", paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))" }}>
             <div className="flex items-center gap-4">
               <span className="text-white font-bold whitespace-nowrap">Cards: {maxCards}</span>
               <input type="range" min={1} max={absMax} value={maxCards}
@@ -292,7 +292,7 @@
       const order = buildOrder(dealer, players);
 
       return (
-        <div className="flex flex-col h-full p-4" style={{ background: DARK }}>
+        <div className="flex flex-col h-full p-4" style={{ background: DARK, paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))" }}>
           <div className="flex justify-between items-start mb-3">
             <div>
               <h1 className="text-2xl font-bold" style={{ color: RED }}>Round {round}</h1>
@@ -337,7 +337,7 @@
       const order = buildOrder(dealer, players);
 
       return (
-        <div className="flex flex-col h-full p-4" style={{ background: DARK }}>
+        <div className="flex flex-col h-full p-4" style={{ background: DARK, paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))" }}>
           <div className="flex justify-between items-center mb-3">
             <h1 className="text-2xl font-bold" style={{ color: RED }}>Round {round} Results</h1>
             <div className="flex gap-2">
@@ -437,7 +437,7 @@
       const sorted = [...players].sort((a, b) => b.totalScore - a.totalScore);
       const medals = ["🥇", "🥈", "🥉"];
       return (
-        <div className="flex flex-col h-full p-4 items-center" style={{ background: DARK }}>
+        <div className="flex flex-col h-full p-4 items-center" style={{ background: DARK, paddingBottom: "calc(16px + env(safe-area-inset-bottom, 0px))" }}>
           <h1 className="text-4xl font-extrabold mt-6 mb-2" style={{ color: RED }}>GAME OVER</h1>
           <p className="text-gray-400 mb-6">{sorted[0]?.name} wins!</p>
           <div className="flex-1 w-full overflow-y-auto space-y-2">
@@ -563,7 +563,7 @@
       };
 
       return (
-        <div className="h-screen w-screen overflow-hidden flex flex-col" style={{ background: DARK }}>
+        <div className="w-screen overflow-hidden flex flex-col" style={{ background: DARK, height: "100dvh" }}>
           <div className="w-full" style={{ paddingTop: "env(safe-area-inset-top, 0px)" }} />
           <div className="flex-1 overflow-hidden">
             {screen === "SETUP" && <SetupScreen onStart={startGame} />}
